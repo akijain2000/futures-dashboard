@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Futures Dashboard — Barchart Live</title>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e;
+      --green: #3fb950; --red: #f85149; --blue: #58a6ff; --accent: #1f6feb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; min-height: 100vh; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 28px; border-bottom: 1px solid var(--border);
+      background: var(--surface); position: sticky; top: 0; z-index: 100;
+    }
+    header h1 { font-size: 1.15rem; font-weight: 600; }
+    header h1 span { color: var(--blue); }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    #last-updated { font-size: 0.78rem; color: var(--muted); }
+    .live-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; animation: pulse 1.8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+    #refresh-btn {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 14px; font-size: 0.82rem; cursor: pointer; transition: opacity .2s;
+    }
+    #refresh-btn:hover { opacity: .82; }
+
+    main { padding: 24px 28px; max-width: 1600px; margin: 0 auto; }
+    section { margin-bottom: 32px; }
+    h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 14px; }
+
+    /* ── Cards ── */
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; cursor: pointer; transition: border-color .2s, transform .15s; position: relative;
+    }
+    .card:hover { border-color: var(--blue); transform: translateY(-2px); }
+    .card.selected { border-color: var(--accent); background: #1a2332; }
+    .card-symbol { font-size: .7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .card-name { font-size: .8rem; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-price { font-size: 1.65rem; font-weight: 700; margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .card-change { font-size: .84rem; font-weight: 600; margin-top: 2px; }
+    .up { color: var(--green); } .down { color: var(--red); }
+    .card-meta { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: .7rem; color: var(--muted); }
+    .card-meta span b { color: var(--text); }
+    .expiry-badge { display: inline-block; margin-top: 8px; background: #21262d; border: 1px solid var(--border); border-radius: 20px; padding: 2px 9px; font-size: .68rem; color: var(--muted); }
+    .expiry-badge.urgent { border-color: var(--red); color: var(--red); }
+    .expiry-badge.soon { border-color: #e3b341; color: #e3b341; }
+    .color-bar { height: 3px; border-radius: 2px; margin-bottom: 10px; }
+    .skeleton { background: #21262d; border-radius: 4px; animation: shimmer 1.2s infinite; }
+    @keyframes shimmer { 0%,100%{opacity:.4} 50%{opacity:.9} }
+
+    /* ── Chart ── */
+    .chart-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .chart-controls { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+    .chart-title { font-size: 1rem; font-weight: 600; }
+    .chart-type-btns button {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: .78rem;
+      margin-left: 6px; transition: all .15s;
+    }
+    .chart-type-btns button.active, .chart-type-btns button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #main-chart { width: 100%; height: 420px; }
+
+    /* ── Expiry ── */
+    .expiry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .expiry-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+    .expiry-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .expiry-card-sym { font-weight: 700; font-size: .95rem; }
+    .expiry-card-date { font-size: .73rem; color: var(--muted); }
+    .expiry-progress-bg { height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+    .expiry-progress-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+    .expiry-days { display: flex; justify-content: space-between; margin-top: 6px; font-size: .72rem; color: var(--muted); }
+    .expiry-days b { font-size: 1rem; font-weight: 700; color: var(--text); }
+
+    /* ── Table ── */
+    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; min-width: 900px; }
+    thead th { background: #1c2128; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+    tbody tr { border-top: 1px solid var(--border); }
+    tbody tr:hover { background: #1a2332; }
+    tbody td { padding: 10px 14px; font-variant-numeric: tabular-nums; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+
+    /* ── Mini charts ── */
+    .multi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .mini-chart-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .mini-chart-title { font-size: .82rem; font-weight: 600; margin-bottom: 8px; color: var(--muted); }
+    .mini-chart { height: 200px; }
+
+    /* ── Data age banner ── */
+    #age-banner {
+      display: none; background: #2d1e00; border: 1px solid #e3b341;
+      color: #e3b341; border-radius: 8px; padding: 8px 16px; margin-bottom: 16px;
+      font-size: .82rem;
+    }
+
+    @media (max-width: 700px) {
+      main { padding: 14px; }
+      .multi-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Futures <span>Dashboard</span></h1>
+  <div class="header-right">
+    <div class="live-dot" title="Data refreshed hourly via GitHub Actions"></div>
+    <span id="last-updated">Loading…</span>
+    <button id="refresh-btn" onclick="loadData()">⟳ Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div id="age-banner"></div>
+
+  <section>
+    <h2>Live Quotes</h2>
+    <div class="cards-grid" id="cards-grid"></div>
+  </section>
+
+  <section>
+    <div class="chart-panel">
+      <div class="chart-controls">
+        <span class="chart-title" id="chart-title">Select a contract</span>
+        <div class="chart-type-btns">
+          <button id="btn-line"   class="active" onclick="setChartType('line')">Line</button>
+          <button id="btn-candle"           onclick="setChartType('candle')">Candlestick</button>
+          <button id="btn-ohlc"             onclick="setChartType('ohlc')">OHLC</button>
+          <button id="btn-volume"           onclick="setChartType('volume')">Volume</button>
+        </div>
+      </div>
+      <div id="main-chart"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Expiry Countdown</h2>
+    <div class="expiry-grid" id="expiry-grid"></div>
+  </section>
+
+  <section>
+    <h2>Contract Summary</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Name</th><th>Last</th><th>Change</th><th>% Chg</th>
+            <th>52W High</th><th>52W Low</th><th>Support</th><th>Resistance</th>
+            <th>Margin</th><th>Expiry</th><th>DTE</th>
+          </tr>
+        </thead>
+        <tbody id="summary-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>All Contracts – 90-Day History</h2>
+    <div class="multi-grid" id="multi-grid"></div>
+  </section>
+</main>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let allData = null;
+let selectedSymbol = null;
+let chartType = "line";
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", loadData);
+
+async function loadData() {
+  document.getElementById("last-updated").textContent = "Loading…";
+  try {
+    const r = await fetch("data.json?t=" + Date.now());
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    allData = await r.json();
+
+    const symbols = Object.keys(allData.quotes);
+    if (!selectedSymbol) selectedSymbol = symbols[0];
+
+    buildCards(symbols);
+    buildExpiryGrid(symbols);
+    buildMiniGrid(symbols);
+    updateAll();
+
+    // Show data age warning if stale > 3 hours
+    const updated = new Date(allData.updated_at);
+    const ageH = (Date.now() - updated) / 36e5;
+    const banner = document.getElementById("age-banner");
+    if (ageH > 3) {
+      banner.style.display = "block";
+      banner.textContent = `⚠ Data last updated ${updated.toUTCString()} (${ageH.toFixed(1)}h ago). GitHub Actions may be paused.`;
+    } else {
+      banner.style.display = "none";
+    }
+
+    document.getElementById("last-updated").textContent =
+      "Updated " + updated.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) + " UTC";
+  } catch (e) {
+    document.getElementById("last-updated").textContent = "Error: " + e.message;
+    console.error(e);
+  }
+}
+
+// ─── Build skeletons ──────────────────────────────────────────────────────────
+function buildCards(symbols) {
+  document.getElementById("cards-grid").innerHTML = symbols.map(sym => `
+    <div class="card" id="card-${sym}" onclick="selectSymbol('${sym}')">
+      <div class="color-bar" id="cbar-${sym}"></div>
+      <div class="card-symbol">${sym}</div>
+      <div class="card-name" id="cname-${sym}">–</div>
+      <div class="card-price" id="cprice-${sym}">–</div>
+      <div class="card-change" id="cchange-${sym}">–</div>
+      <div class="card-meta" id="cmeta-${sym}"></div>
+      <span class="expiry-badge" id="cbadge-${sym}">–</span>
+    </div>
+  `).join("");
+}
+
+function buildExpiryGrid(symbols) {
+  document.getElementById("expiry-grid").innerHTML = symbols.map(sym => `
+    <div class="expiry-card">
+      <div class="expiry-card-header">
+        <span class="expiry-card-sym" id="ex-sym-${sym}">${sym}</span>
+        <span class="expiry-card-date" id="ex-date-${sym}">–</span>
+      </div>
+      <div class="expiry-progress-bg">
+        <div class="expiry-progress-fill" id="ex-fill-${sym}" style="width:0%"></div>
+      </div>
+      <div class="expiry-days">
+        <span><b id="ex-dte-${sym}">–</b> days remaining</span>
+        <span id="ex-pct-${sym}"></span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function buildMiniGrid(symbols) {
+  document.getElementById("multi-grid").innerHTML = symbols.map(sym => `
+    <div class="mini-chart-panel">
+      <div class="mini-chart-title" id="mini-title-${sym}">${sym}</div>
+      <div class="mini-chart" id="mini-${sym}"></div>
+    </div>
+  `).join("");
+}
+
+// ─── Update all panels ────────────────────────────────────────────────────────
+function updateAll() {
+  const symbols = Object.keys(allData.quotes);
+  symbols.forEach(sym => {
+    updateCard(sym);
+    updateExpiryRow(sym);
+    updateMiniChart(sym);
+  });
+  updateTable(symbols);
+  updateMainChart();
+  // highlight selected
+  symbols.forEach(s =>
+    document.getElementById(`card-${s}`)?.classList.toggle("selected", s === selectedSymbol)
+  );
+}
+
+// ─── Card ─────────────────────────────────────────────────────────────────────
+function updateCard(sym) {
+  const q = allData.quotes[sym] || {};
+  const color = q.color || "#2196F3";
+  document.getElementById(`cbar-${sym}`).style.background = color;
+  document.getElementById(`cname-${sym}`).textContent = q.name || sym;
+  document.getElementById(`cprice-${sym}`).textContent = q.last != null ? fmt(q.last) : "–";
+
+  const changeEl = document.getElementById(`cchange-${sym}`);
+  if (q.change != null) {
+    const up = q.change >= 0;
+    const sign = up ? "+" : "";
+    const pctStr = q.pct_change != null ? ` (${sign}${q.pct_change.toFixed(2)}%)` : "";
+    changeEl.textContent = `${sign}${fmt(q.change)}${pctStr}`;
+    changeEl.className = "card-change " + (up ? "up" : "down");
+  }
+
+  document.getElementById(`cmeta-${sym}`).innerHTML = [
+    q.high52    != null ? `<span>52W H <b>${fmt(q.high52)}</b></span>` : "",
+    q.low52     != null ? `<span>52W L <b>${fmt(q.low52)}</b></span>` : "",
+    q.support1  != null ? `<span>S1 <b>${fmt(q.support1)}</b></span>` : "",
+    q.resistance1 != null ? `<span>R1 <b>${fmt(q.resistance1)}</b></span>` : "",
+  ].join("");
+
+  const dte = q.days_to_expiry ?? -1;
+  const badge = document.getElementById(`cbadge-${sym}`);
+  badge.textContent = dte >= 0 ? `Expires in ${dte}d` : `Exp: ${q.expiry || "–"}`;
+  badge.className = "expiry-badge" + (dte >= 0 && dte <= 30 ? " urgent" : dte <= 90 ? " soon" : "");
+}
+
+// ─── Expiry ───────────────────────────────────────────────────────────────────
+function updateExpiryRow(sym) {
+  const q = allData.quotes[sym] || {};
+  const dte = q.days_to_expiry ?? -1;
+  const pct = dte >= 0 ? Math.min(100, (dte / 365) * 100) : 0;
+  document.getElementById(`ex-sym-${sym}`).textContent  = q.name || sym;
+  document.getElementById(`ex-date-${sym}`).textContent = q.expiry ? `Expires ${q.expiry}` : "–";
+  document.getElementById(`ex-dte-${sym}`).textContent  = dte >= 0 ? dte : "–";
+  document.getElementById(`ex-pct-${sym}`).textContent  = dte >= 0 ? `${pct.toFixed(1)}% of year` : "";
+  const fill = document.getElementById(`ex-fill-${sym}`);
+  fill.style.width      = pct + "%";
+  fill.style.background = dte <= 30 ? "#f85149" : dte <= 90 ? "#e3b341" : "#3fb950";
+}
+
+// ─── Main Chart ───────────────────────────────────────────────────────────────
+function selectSymbol(sym) {
+  selectedSymbol = sym;
+  Object.keys(allData.quotes).forEach(s =>
+    document.getElementById(`card-${s}`)?.classList.toggle("selected", s === sym)
+  );
+  const q = allData.quotes[sym] || {};
+  document.getElementById("chart-title").textContent = (q.name || sym) + " — Price History";
+  updateMainChart();
+}
+
+function setChartType(type) {
+  chartType = type;
+  ["line","candle","ohlc","volume"].forEach(t =>
+    document.getElementById(`btn-${t}`)?.classList.remove("active")
+  );
+  document.getElementById(`btn-${type}`)?.classList.add("active");
+  updateMainChart();
+}
+
+function updateMainChart() {
+  if (!allData || !selectedSymbol) return;
+  const hist = allData.history[selectedSymbol] || [];
+  if (!hist.length) return;
+
+  const q     = allData.quotes[selectedSymbol] || {};
+  const color = q.color || "#2196F3";
+  const dates  = hist.map(r => r.date);
+  const opens  = hist.map(r => r.open);
+  const highs  = hist.map(r => r.high);
+  const lows   = hist.map(r => r.low);
+  const closes = hist.map(r => r.close);
+  const vols   = hist.map(r => r.volume);
+
+  const layout = {
+    paper_bgcolor: "#161b22", plot_bgcolor: "#161b22",
+    font: { color: "#e6edf3", family: "inherit" },
+    margin: { l: 55, r: 20, t: 10, b: 50 },
+    xaxis: { gridcolor: "#21262d", linecolor: "#30363d", tickfont: { size: 11 }, rangeslider: { visible: false } },
+    yaxis: { gridcolor: "#21262d", linecolor: "#30363d", tickfont: { size: 11 }, side: "right" },
+    hovermode: "x unified", showlegend: false,
+  };
+
+  let traces = [];
+  if (chartType === "line") {
+    traces = [{
+      type: "scatter", mode: "lines", x: dates, y: closes,
+      line: { color, width: 2 },
+      fill: "tozeroy", fillcolor: hexRgba(color, .08),
+    }];
+  } else if (chartType === "candle") {
+    traces = [{
+      type: "candlestick", x: dates, open: opens, high: highs, low: lows, close: closes,
+      increasing: { line: { color: "#3fb950" }, fillcolor: "#3fb950" },
+      decreasing: { line: { color: "#f85149" }, fillcolor: "#f85149" },
+    }];
+  } else if (chartType === "ohlc") {
+    traces = [{
+      type: "ohlc", x: dates, open: opens, high: highs, low: lows, close: closes,
+      increasing: { line: { color: "#3fb950" } },
+      decreasing: { line: { color: "#f85149" } },
+    }];
+  } else {
+    const barColors = closes.map((c, i) => i === 0 ? "#3fb950" : c >= closes[i-1] ? "#3fb950" : "#f85149");
+    layout.yaxis2 = { overlaying: "y", side: "right", gridcolor: "#21262d", showgrid: false, tickfont: { size: 11 } };
+    traces = [
+      { type: "scatter", mode: "lines", x: dates, y: closes, line: { color, width: 1.5 }, yaxis: "y2", name: "Price" },
+      { type: "bar", x: dates, y: vols, marker: { color: barColors, opacity: .6 }, name: "Volume" },
+    ];
+  }
+
+  if (q.support1 && chartType !== "volume") {
+    traces.push({ type: "scatter", mode: "lines", x: [dates[0], dates.at(-1)], y: [q.support1, q.support1], line: { color: "#3fb950", width: 1, dash: "dot" }, name: "S1" });
+  }
+  if (q.resistance1 && chartType !== "volume") {
+    traces.push({ type: "scatter", mode: "lines", x: [dates[0], dates.at(-1)], y: [q.resistance1, q.resistance1], line: { color: "#f85149", width: 1, dash: "dot" }, name: "R1" });
+  }
+
+  Plotly.react("main-chart", traces, layout, { responsive: true, displayModeBar: false });
+  document.getElementById("chart-title").textContent = (q.name || selectedSymbol) + " — Price History";
+}
+
+// ─── Summary Table ────────────────────────────────────────────────────────────
+function updateTable(symbols) {
+  document.getElementById("summary-table").innerHTML = symbols.map(sym => {
+    const q = allData.quotes[sym] || {};
+    const up = (q.change ?? 0) >= 0;
+    const dte = q.days_to_expiry ?? "–";
+    const dteColor = dte <= 30 ? "#f85149" : dte <= 90 ? "#e3b341" : "#3fb950";
+    return `
+      <tr onclick="selectSymbol('${sym}')" style="cursor:pointer">
+        <td><span class="dot" style="background:${q.color||'#58a6ff'}"></span><b>${sym}</b></td>
+        <td style="color:var(--muted)">${q.name||"–"}</td>
+        <td><b>${q.last != null ? fmt(q.last) : "–"}</b></td>
+        <td class="${q.change != null ? (up?"up":"down") : ""}">${q.change != null ? (up?"+":"") + fmt(q.change) : "–"}</td>
+        <td class="${q.pct_change != null ? (up?"up":"down") : ""}">${q.pct_change != null ? (up?"+":"") + q.pct_change.toFixed(2) + "%" : "–"}</td>
+        <td>${q.high52 != null ? fmt(q.high52) : "–"}</td>
+        <td>${q.low52  != null ? fmt(q.low52)  : "–"}</td>
+        <td style="color:var(--green)">${q.support1    != null ? fmt(q.support1)    : "–"}</td>
+        <td style="color:var(--red)"  >${q.resistance1 != null ? fmt(q.resistance1) : "–"}</td>
+        <td>${q.margin != null ? "$" + q.margin.toLocaleString() : "–"}</td>
+        <td style="color:var(--muted)">${q.expiry||"–"}</td>
+        <td style="color:${dteColor};font-weight:700">${dte}</td>
+      </tr>`;
+  }).join("");
+}
+
+// ─── Mini Charts ──────────────────────────────────────────────────────────────
+function updateMiniChart(sym) {
+  const hist = allData.history[sym] || [];
+  if (!hist.length) return;
+  const q = allData.quotes[sym] || {};
+  const color = q.color || "#2196F3";
+  const dates  = hist.map(r => r.date);
+  const closes = hist.map(r => r.close);
+  const isUp   = closes.at(-1) >= closes[0];
+
+  document.getElementById(`mini-title-${sym}`).textContent =
+    (q.name || sym) + (q.last != null ? "  " + fmt(q.last) : "");
+
+  Plotly.react(`mini-${sym}`, [{
+    type: "scatter", mode: "lines", x: dates, y: closes,
+    line: { color: isUp ? "#3fb950" : "#f85149", width: 1.5 },
+    fill: "tozeroy",
+    fillcolor: isUp ? "rgba(63,185,80,.06)" : "rgba(248,81,73,.06)",
+  }], {
+    paper_bgcolor: "#161b22", plot_bgcolor: "#161b22",
+    font: { color: "#8b949e", size: 9 },
+    margin: { l: 40, r: 10, t: 4, b: 30 },
+    xaxis: { gridcolor: "#21262d", linecolor: "#30363d", tickfont: { size: 9 } },
+    yaxis: { gridcolor: "#21262d", linecolor: "#30363d", tickfont: { size: 9 }, side: "right" },
+    showlegend: false, hovermode: "x",
+  }, { responsive: true, displayModeBar: false });
+}
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n == null) return "–";
+  const a = Math.abs(n);
+  if (a >= 1000) return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (a >= 10)   return n.toFixed(2);
+  if (a >= 1)    return n.toFixed(3);
+  return n.toFixed(4);
+}
+function hexRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+</script>
+</body>
+</html>
